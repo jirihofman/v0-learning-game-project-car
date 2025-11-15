@@ -122,7 +122,7 @@ export default function CarGame() {
       // Update the rotation reference
       currentRotationRef.current = degrees
 
-      // Apply the rotation directly to the DOM element
+      // Apply the rotation directly to the DOM element, include visual offset
       triangleRef.current.style.transform = `translate(-50%, -50%) rotate(${degrees}deg)`
     }
   }
@@ -364,7 +364,7 @@ export default function CarGame() {
               {/* The triangle is positioned absolutely over the board */}
               <div
                 ref={triangleRef}
-                className="absolute transform -translate-x-1/2 -translate-y-1/2 transition-all duration-500 ease-in-out z-10"
+                className="absolute transition-all duration-500 ease-in-out z-10"
                 style={{
                   left: `${carPosition[0] * CELL_SIZE + CELL_SIZE / 2}px`,
                   top: `${carPosition[1] * CELL_SIZE + CELL_SIZE / 2}px`,
@@ -379,7 +379,8 @@ export default function CarGame() {
                   xmlns="http://www.w3.org/2000/svg"
                   className={`${hasWon ? "text-green-500" : hasFailed ? "text-red-500" : "text-blue-500"}`}
                 >
-                  <polygon points="12,2 22,20 2,20" fill="currentColor" stroke="currentColor" strokeWidth="1" />
+                  {/* Centered triangle: base at y=19, apex at y=5, horizontally centered at x=12 */}
+                  <polygon points="12,5 21,19 3,19" fill="currentColor" stroke="currentColor" strokeWidth="1" />
                 </svg>
               </div>
             </div>
