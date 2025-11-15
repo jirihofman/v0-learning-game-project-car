@@ -519,7 +519,7 @@ export default function CarGame() {
                   variant={gameMode === "basic" ? "default" : "outline"}
                   className="flex-1"
                 >
-                  🚗 Basic
+                  🚗 STANDARD
                 </Button>
                 <Button
                   onClick={() => changeGameMode("pickFood")}
@@ -527,7 +527,7 @@ export default function CarGame() {
                   variant={gameMode === "pickFood" ? "default" : "outline"}
                   className="flex-1"
                 >
-                  🍎 Pick Food
+                  🍎 FOOD
                 </Button>
                 <Button
                   onClick={() => changeGameMode("obstacles")}
@@ -535,7 +535,7 @@ export default function CarGame() {
                   variant={gameMode === "obstacles" ? "default" : "outline"}
                   className="flex-1"
                 >
-                  🪨 Obstacles
+                  🪨 ROCKS
                 </Button>
               </div>
             </div>
