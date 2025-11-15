@@ -17,12 +17,16 @@ enum Direction {
 // Command types
 type Command = "forward" | "left" | "right"
 
+// Game mode types
+type GameMode = "basic" | "pickFood" | "obstacles"
+
 export default function CarGame() {
   // Board size
   const BOARD_SIZE = 5
   const CELL_SIZE = 64 // Size of each cell in pixels
 
   // Game state
+  const [gameMode, setGameMode] = useState<GameMode>("basic")
   const [startPosition, setStartPosition] = useState<[number, number]>([0, 0])
   const [endPosition, setEndPosition] = useState<[number, number]>([4, 4])
   const [carPosition, setCarPosition] = useState<[number, number]>([0, 0])
@@ -32,6 +36,9 @@ export default function CarGame() {
   const [hasWon, setHasWon] = useState(false)
   const [hasFailed, setHasFailed] = useState(false)
   const [currentCommandIndex, setCurrentCommandIndex] = useState(-1)
+  const [foodPositions, setFoodPositions] = useState<[number, number][]>([])
+  const [collectedFood, setCollectedFood] = useState<number[]>([])
+  const [obstacles, setObstacles] = useState<[number, number][]>([])
 
   // Use refs for direct DOM manipulation without re-renders
   const triangleRef = useRef<HTMLDivElement>(null)
@@ -43,21 +50,77 @@ export default function CarGame() {
     resetGame()
   }, [])
 
+  // Reset game when mode changes
+  useEffect(() => {
+    if (gameMode) {
+      resetGame()
+    }
+  }, [gameMode])
+
+  // Change game mode
+  const changeGameMode = (mode: GameMode) => {
+    if (!isExecuting) {
+      setGameMode(mode)
+    }
+  }
+
   // Reset the game with a new random board
   const resetGame = () => {
-    // Generate random start and end positions
-    const start: [number, number] = [Math.floor(Math.random() * BOARD_SIZE), Math.floor(Math.random() * BOARD_SIZE)]
+    let start: [number, number] = [Math.floor(Math.random() * BOARD_SIZE), Math.floor(Math.random() * BOARD_SIZE)]
+    let end: [number, number] = [0, 0]
+    let foods: [number, number][] = []
+    let obs: [number, number][] = []
 
-    // Make sure end position is different from start
-    let end: [number, number]
-    do {
-      end = [Math.floor(Math.random() * BOARD_SIZE), Math.floor(Math.random() * BOARD_SIZE)]
-    } while (end[0] === start[0] && end[1] === start[1])
+    if (gameMode === "basic") {
+      // Generate random start and end positions
+      // Make sure end position is different from start
+      do {
+        end = [Math.floor(Math.random() * BOARD_SIZE), Math.floor(Math.random() * BOARD_SIZE)]
+      } while (end[0] === start[0] && end[1] === start[1])
+    } else if (gameMode === "pickFood") {
+      // For pick food mode, no start/end, place car at center and generate 2 food positions
+      start = [Math.floor(BOARD_SIZE / 2), Math.floor(BOARD_SIZE / 2)]
+      
+      // Generate 2 random food positions (different from start)
+      const foodEmojis = ["🍎", "🍌"]
+      for (let i = 0; i < 2; i++) {
+        let foodPos: [number, number]
+        do {
+          foodPos = [Math.floor(Math.random() * BOARD_SIZE), Math.floor(Math.random() * BOARD_SIZE)]
+        } while (
+          (foodPos[0] === start[0] && foodPos[1] === start[1]) ||
+          foods.some(f => f[0] === foodPos[0] && f[1] === foodPos[1])
+        )
+        foods.push(foodPos)
+      }
+    } else if (gameMode === "obstacles") {
+      // Generate random start and end positions
+      do {
+        end = [Math.floor(Math.random() * BOARD_SIZE), Math.floor(Math.random() * BOARD_SIZE)]
+      } while (end[0] === start[0] && end[1] === start[1])
+
+      // Generate 2-4 random obstacle positions
+      const numObstacles = 2 + Math.floor(Math.random() * 3) // 2-4 obstacles
+      for (let i = 0; i < numObstacles; i++) {
+        let obstaclePos: [number, number]
+        do {
+          obstaclePos = [Math.floor(Math.random() * BOARD_SIZE), Math.floor(Math.random() * BOARD_SIZE)]
+        } while (
+          (obstaclePos[0] === start[0] && obstaclePos[1] === start[1]) ||
+          (obstaclePos[0] === end[0] && obstaclePos[1] === end[1]) ||
+          obs.some(o => o[0] === obstaclePos[0] && o[1] === obstaclePos[1])
+        )
+        obs.push(obstaclePos)
+      }
+    }
 
     setStartPosition(start)
     setEndPosition(end)
     setCarPosition(start)
     setCarDirection(Direction.North)
+    setFoodPositions(foods)
+    setCollectedFood([])
+    setObstacles(obs)
 
     // Reset rotation and position
     currentRotationRef.current = 0
@@ -198,12 +261,36 @@ export default function CarGame() {
         currentX = newX
         currentY = newY
 
+        // Check for obstacle collision
+        if (gameMode === "obstacles") {
+          const hitObstacle = obstacles.some(obs => obs[0] === currentX && obs[1] === currentY)
+          if (hitObstacle) {
+            updateTrianglePosition(currentX, currentY, true)
+            setCarPosition([currentX, currentY])
+            setHasFailed(true)
+            break
+          }
+        }
+
         // Update the UI with animation
         updateTrianglePosition(currentX, currentY, true)
         setCarPosition([currentX, currentY])
 
-        // Check if we reached the end
-        if (currentX === endPosition[0] && currentY === endPosition[1]) {
+        // Check for food collection
+        if (gameMode === "pickFood") {
+          const foodIndex = foodPositions.findIndex(food => food[0] === currentX && food[1] === currentY)
+          if (foodIndex !== -1 && !collectedFood.includes(foodIndex)) {
+            setCollectedFood(prev => [...prev, foodIndex])
+            // Check if all food collected
+            if (collectedFood.length + 1 === foodPositions.length) {
+              setHasWon(true)
+              break
+            }
+          }
+        }
+
+        // Check if we reached the end (for basic and obstacles mode)
+        if ((gameMode === "basic" || gameMode === "obstacles") && currentX === endPosition[0] && currentY === endPosition[1]) {
           setHasWon(true)
           break
         }
@@ -318,19 +405,27 @@ export default function CarGame() {
     for (let y = 0; y < BOARD_SIZE; y++) {
       const row = []
       for (let x = 0; x < BOARD_SIZE; x++) {
-        const isStart = startPosition[0] === x && startPosition[1] === y
-        const isEnd = endPosition[0] === x && endPosition[1] === y
+        const isStart = gameMode !== "pickFood" && startPosition[0] === x && startPosition[1] === y
+        const isEnd = (gameMode === "basic" || gameMode === "obstacles") && endPosition[0] === x && endPosition[1] === y
         const isCar = carPosition[0] === x && carPosition[1] === y
+        const foodIndex = foodPositions.findIndex(food => food[0] === x && food[1] === y)
+        const isFood = foodIndex !== -1
+        const isFoodCollected = isFood && collectedFood.includes(foodIndex)
+        const isObstacle = obstacles.some(obs => obs[0] === x && obs[1] === y)
 
-        let cellClass = `w-[${CELL_SIZE}px] h-[${CELL_SIZE}px] border flex items-center justify-center`
+        let cellClass = `w-[${CELL_SIZE}px] h-[${CELL_SIZE}px] border flex items-center justify-center relative`
 
         if (isStart) {
           cellClass += " bg-blue-100"
         } else if (isEnd) {
           cellClass += " bg-green-100"
+        } else if (isObstacle) {
+          cellClass += " bg-gray-100"
         } else {
           cellClass += " bg-white"
         }
+
+        const foodEmojis = ["🍎", "🍌"]
 
         row.push(
           <div key={`${x}-${y}`} className={cellClass} style={{ width: CELL_SIZE, height: CELL_SIZE }}>
@@ -339,6 +434,21 @@ export default function CarGame() {
               <Badge variant="outline" className="bg-green-50">
                 End
               </Badge>
+            )}
+            {isFood && !isFoodCollected && (
+              <span className="text-3xl" style={{ position: "relative", zIndex: 5 }}>
+                {foodEmojis[foodIndex]}
+              </span>
+            )}
+            {isFood && isFoodCollected && (
+              <span className="text-3xl opacity-30" style={{ position: "relative", zIndex: 5 }}>
+                ✨
+              </span>
+            )}
+            {isObstacle && (
+              <span className="text-3xl" style={{ position: "relative", zIndex: 5 }}>
+                🪨
+              </span>
             )}
           </div>,
         )
@@ -399,6 +509,36 @@ export default function CarGame() {
         {/* Controls */}
         <div className="flex-1">
           <Card className="p-4">
+            {/* Game Mode buttons */}
+            <div className="mb-6">
+              <p className="text-sm font-medium mb-2">Game Mode:</p>
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => changeGameMode("basic")}
+                  disabled={isExecuting}
+                  variant={gameMode === "basic" ? "default" : "outline"}
+                  className="flex-1"
+                >
+                  🚗 Basic
+                </Button>
+                <Button
+                  onClick={() => changeGameMode("pickFood")}
+                  disabled={isExecuting}
+                  variant={gameMode === "pickFood" ? "default" : "outline"}
+                  className="flex-1"
+                >
+                  🍎 Pick Food
+                </Button>
+                <Button
+                  onClick={() => changeGameMode("obstacles")}
+                  disabled={isExecuting}
+                  variant={gameMode === "obstacles" ? "default" : "outline"}
+                  className="flex-1"
+                >
+                  🪨 Obstacles
+                </Button>
+              </div>
+            </div>
 
             {/* Command buttons */}
             <div className="flex gap-2 mb-6">
@@ -466,12 +606,16 @@ export default function CarGame() {
             {/* Status message */}
             {hasWon && (
               <div className="mt-4 p-2 bg-green-100 text-green-800 rounded-md text-center">
-                Success! The triangle reached the destination.
+                {gameMode === "pickFood" 
+                  ? "Success! You collected all the food! 🎉"
+                  : "Success! The car reached the destination! 🎉"}
               </div>
             )}
             {hasFailed && (
               <div className="mt-4 p-2 bg-red-100 text-red-800 rounded-md text-center">
-                The triangle couldn't complete all commands. Try again!
+                {gameMode === "obstacles"
+                  ? "Oops! The car hit an obstacle! Try again! 💥"
+                  : "The car couldn't complete all commands. Try again!"}
               </div>
             )}
           </Card>
