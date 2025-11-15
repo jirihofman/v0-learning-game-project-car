@@ -379,8 +379,17 @@ export default function CarGame() {
                   xmlns="http://www.w3.org/2000/svg"
                   className={`${hasWon ? "text-green-500" : hasFailed ? "text-red-500" : "text-blue-500"}`}
                 >
-                  {/* Centered triangle: base at y=19, apex at y=5, horizontally centered at x=12 */}
-                  <polygon points="12,5 21,19 3,19" fill="currentColor" stroke="currentColor" strokeWidth="1" />
+                  {/* Top-down car view with pointed front and flat back */}
+                  {/* Main car body with tapered front */}
+                  <polygon points="12,2 15,6 15,18 9,18 9,6" fill="currentColor" />
+                  {/* Front windshield */}
+                  <polygon points="11,7 13,7 13,10 11,10" fill="currentColor" opacity="0.4" />
+                  {/* Rear window */}
+                  <polygon points="11,13 13,13 13,16 11,16" fill="currentColor" opacity="0.3" />
+                  {/* Left mirror */}
+                  <circle cx="7.5" cy="8" r="0.8" fill="currentColor" opacity="0.6" />
+                  {/* Right mirror */}
+                  <circle cx="16.5" cy="8" r="0.8" fill="currentColor" opacity="0.6" />
                 </svg>
               </div>
             </div>
