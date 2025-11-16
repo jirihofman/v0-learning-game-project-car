@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { RotateCw, Play, Trash2 } from "lucide-react"
+import { RotateCw, Play, Trash2, Undo } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 // Direction enum (clockwise order)
@@ -157,6 +157,15 @@ export default function CarGame() {
         updateTrianglePosition(startPosition[0], startPosition[1], false)
       }
 
+      setHasWon(false)
+      setHasFailed(false)
+    }
+  }
+
+  // Remove the last command
+  const removeLastCommand = () => {
+    if (!isExecuting && commands.length > 0) {
+      setCommands(commands.slice(0, -1))
       setHasWon(false)
       setHasFailed(false)
     }
@@ -587,6 +596,15 @@ export default function CarGame() {
               >
                 <Play className="mr-1 h-4 w-4" />
                 Go
+              </Button>
+              <Button
+                onClick={removeLastCommand}
+                disabled={commands.length === 0 || isExecuting}
+                className="flex-1"
+                variant="outline"
+              >
+                <Undo className="mr-1 h-4 w-4" />
+                Undo
               </Button>
               <Button
                 onClick={clearCommands}
