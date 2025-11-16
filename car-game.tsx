@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { RotateCw, Play, Trash2 } from "lucide-react"
+import { RotateCw, Play, Trash2, Undo } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 // Direction enum (clockwise order)
@@ -157,6 +157,15 @@ export default function CarGame() {
         updateTrianglePosition(startPosition[0], startPosition[1], false)
       }
 
+      setHasWon(false)
+      setHasFailed(false)
+    }
+  }
+
+  // Remove the last command
+  const removeLastCommand = () => {
+    if (!isExecuting && commands.length > 0) {
+      setCommands(commands.slice(0, -1))
       setHasWon(false)
       setHasFailed(false)
     }
@@ -509,37 +518,6 @@ export default function CarGame() {
         {/* Controls */}
         <div className="flex-1">
           <Card className="p-4">
-            {/* Game Mode buttons */}
-            <div className="mb-6">
-              <p className="text-sm font-medium mb-2">Game Mode:</p>
-              <div className="flex gap-2">
-                <Button
-                  onClick={() => changeGameMode("basic")}
-                  disabled={isExecuting}
-                  variant={gameMode === "basic" ? "default" : "outline"}
-                  className="flex-1"
-                >
-                  🚗 STANDARD
-                </Button>
-                <Button
-                  onClick={() => changeGameMode("pickFood")}
-                  disabled={isExecuting}
-                  variant={gameMode === "pickFood" ? "default" : "outline"}
-                  className="flex-1"
-                >
-                  🍎 FOOD
-                </Button>
-                <Button
-                  onClick={() => changeGameMode("obstacles")}
-                  disabled={isExecuting}
-                  variant={gameMode === "obstacles" ? "default" : "outline"}
-                  className="flex-1"
-                >
-                  🪨 ROCKS
-                </Button>
-              </div>
-            </div>
-
             {/* Command buttons */}
             <div className="flex gap-2 mb-6">
               <Button onClick={() => addCommand("forward")} disabled={isExecuting || hasWon} className="flex-1">
@@ -589,6 +567,15 @@ export default function CarGame() {
                 Go
               </Button>
               <Button
+                onClick={removeLastCommand}
+                disabled={commands.length === 0 || isExecuting}
+                className="flex-1"
+                variant="outline"
+              >
+                <Undo className="mr-1 h-4 w-4" />
+                Undo
+              </Button>
+              <Button
                 onClick={clearCommands}
                 disabled={commands.length === 0 || isExecuting}
                 className="flex-1"
@@ -618,6 +605,40 @@ export default function CarGame() {
                   : "The car couldn't complete all commands. Try again!"}
               </div>
             )}
+
+            {/* Game Mode buttons */}
+            <div className="mt-6">
+              <p className="text-xs text-muted-foreground mb-2">Game Mode:</p>
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => changeGameMode("basic")}
+                  disabled={isExecuting}
+                  variant={gameMode === "basic" ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1"
+                >
+                  🚗 STANDARD
+                </Button>
+                <Button
+                  onClick={() => changeGameMode("pickFood")}
+                  disabled={isExecuting}
+                  variant={gameMode === "pickFood" ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1"
+                >
+                  🍎 FOOD
+                </Button>
+                <Button
+                  onClick={() => changeGameMode("obstacles")}
+                  disabled={isExecuting}
+                  variant={gameMode === "obstacles" ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1"
+                >
+                  🪨 ROCKS
+                </Button>
+              </div>
+            </div>
           </Card>
         </div>
       </div>
