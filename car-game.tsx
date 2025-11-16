@@ -518,37 +518,6 @@ export default function CarGame() {
         {/* Controls */}
         <div className="flex-1">
           <Card className="p-4">
-            {/* Game Mode buttons */}
-            <div className="mb-6">
-              <p className="text-sm font-medium mb-2">Game Mode:</p>
-              <div className="flex gap-2">
-                <Button
-                  onClick={() => changeGameMode("basic")}
-                  disabled={isExecuting}
-                  variant={gameMode === "basic" ? "default" : "outline"}
-                  className="flex-1"
-                >
-                  🚗 STANDARD
-                </Button>
-                <Button
-                  onClick={() => changeGameMode("pickFood")}
-                  disabled={isExecuting}
-                  variant={gameMode === "pickFood" ? "default" : "outline"}
-                  className="flex-1"
-                >
-                  🍎 FOOD
-                </Button>
-                <Button
-                  onClick={() => changeGameMode("obstacles")}
-                  disabled={isExecuting}
-                  variant={gameMode === "obstacles" ? "default" : "outline"}
-                  className="flex-1"
-                >
-                  🪨 ROCKS
-                </Button>
-              </div>
-            </div>
-
             {/* Command buttons */}
             <div className="flex gap-2 mb-6">
               <Button onClick={() => addCommand("forward")} disabled={isExecuting || hasWon} className="flex-1">
@@ -636,6 +605,40 @@ export default function CarGame() {
                   : "The car couldn't complete all commands. Try again!"}
               </div>
             )}
+
+            {/* Game Mode buttons */}
+            <div className="mt-6">
+              <p className="text-xs text-muted-foreground mb-2">Game Mode:</p>
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => changeGameMode("basic")}
+                  disabled={isExecuting}
+                  variant={gameMode === "basic" ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1"
+                >
+                  🚗 STANDARD
+                </Button>
+                <Button
+                  onClick={() => changeGameMode("pickFood")}
+                  disabled={isExecuting}
+                  variant={gameMode === "pickFood" ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1"
+                >
+                  🍎 FOOD
+                </Button>
+                <Button
+                  onClick={() => changeGameMode("obstacles")}
+                  disabled={isExecuting}
+                  variant={gameMode === "obstacles" ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1"
+                >
+                  🪨 ROCKS
+                </Button>
+              </div>
+            </div>
           </Card>
         </div>
       </div>
