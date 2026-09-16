@@ -5,8 +5,10 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev",
-    "lint": "eslint .",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -46,7 +48,7 @@
     "embla-carousel-react": "8.5.1",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
-    "next": "15.4.10",
+    "next": "16.3.5",
     "next-themes": "^0.4.6",
     "react": "19.2.0",
     "react-day-picker": "9.8.0",
@@ -57,10 +59,10 @@
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
-    
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.1.9",
     "@types/node": "^22",
     "@types/react": "19.2.5",
@@ -73,5 +75,10 @@
   "overrides": {
     "@types/react": "19.2.5",
     "@types/react-dom": "19.2.3"
-  }
+  },
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "type": "module"
 }

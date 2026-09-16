@@ -80,3 +80,7 @@ logs
 
 # local rpcs
 dev-debug.log
+
+# Browser verification artifacts
+/test-results/
+/playwright-report/
