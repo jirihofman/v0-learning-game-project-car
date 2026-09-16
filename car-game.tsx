@@ -1,626 +1,1083 @@
-"use client"
+'use client'
 
-import { useState, useEffect, useRef } from "react"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { RotateCw, Play, Trash2 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
+import {
+  ArrowRight,
+  ArrowUp,
+  Check,
+  ChevronRight,
+  CircleHelp,
+  Flag,
+  Footprints,
+  Gem,
+  Lightbulb,
+  Map,
+  Mountain,
+  Play,
+  RotateCcw,
+  Route,
+  Sparkles,
+  Sprout,
+  Square,
+  Star,
+  Trophy,
+  Undo2,
+  X,
+  CornerUpLeft,
+  CornerUpRight,
+  Apple,
+  Trash2,
+} from 'lucide-react'
+import { AdventureArt } from '@/components/game-art'
+import { GameBoard } from '@/components/game-board'
+import { Stars } from '@/components/game-stars'
+import {
+  finishRun,
+  generateLevel,
+  getStars,
+  initialRunState,
+  stepRun,
+  type Command,
+  type Difficulty,
+  type Level,
+  type Mode,
+  type Point,
+  type RunState,
+} from '@/lib/game-engine'
+import {
+  awardStars,
+  completedLevels,
+  parseProgress,
+  PROGRESS_KEY,
+  totalStars,
+  type Progress,
+} from '@/lib/game-progress'
 
-// Direction enum (clockwise order)
-enum Direction {
-  North = 0,
-  East = 1,
-  South = 2,
-  West = 3,
+const MODES = [
+  {
+    id: 'explore' as const,
+    name: 'Trail explorer',
+    description: 'Find your way to the flag',
+    icon: Flag,
+    tag: 'Start here',
+    color: 'green',
+    mission: 'Get your little car to the flag.',
+    collection: '',
+  },
+  {
+    id: 'collect' as const,
+    name: 'Fruit pickup',
+    description: 'A tasty little treasure hunt',
+    icon: Apple,
+    tag: '',
+    color: 'peach',
+    mission: 'Pick up every apple on the map.',
+    collection: 'apples',
+  },
+  {
+    id: 'obstacles' as const,
+    name: 'Rocky roads',
+    description: 'Think around the obstacles',
+    icon: Mountain,
+    tag: '',
+    color: 'blue',
+    mission: 'Reach the flag. Watch out for rocks!',
+    collection: '',
+  },
+  {
+    id: 'treasure' as const,
+    name: 'Treasure quest',
+    description: 'Collect, explore, and discover',
+    icon: Gem,
+    tag: '',
+    color: 'purple',
+    mission: 'Collect every gem, then reach the flag.',
+    collection: 'gems',
+  },
+]
+const DIFFICULTIES = [
+  {
+    id: 'easy' as const,
+    name: 'Easy',
+    description: 'Little steps',
+    icon: Sprout,
+  },
+  {
+    id: 'medium' as const,
+    name: 'Medium',
+    description: 'Growing skills',
+    icon: Footprints,
+  },
+  {
+    id: 'hard' as const,
+    name: 'Hard',
+    description: 'Big adventures',
+    icon: Mountain,
+  },
+]
+const COMMANDS = {
+  forward: { name: 'Forward', detail: 'Move 1 tile', icon: ArrowUp },
+  left: { name: 'Turn left', detail: 'Stay & turn', icon: CornerUpLeft },
+  right: { name: 'Turn right', detail: 'Stay & turn', icon: CornerUpRight },
 }
-
-// Command types
-type Command = "forward" | "left" | "right"
-
-// Game mode types
-type GameMode = "basic" | "pickFood" | "obstacles"
+const DIRECTIONS = ['up', 'right', 'down', 'left']
+const STAGES = 6
 
 export default function CarGame() {
-  // Board size
-  const BOARD_SIZE = 5
-  const CELL_SIZE = 64 // Size of each cell in pixels
-
-  // Game state
-  const [gameMode, setGameMode] = useState<GameMode>("basic")
-  const [startPosition, setStartPosition] = useState<[number, number]>([0, 0])
-  const [endPosition, setEndPosition] = useState<[number, number]>([4, 4])
-  const [carPosition, setCarPosition] = useState<[number, number]>([0, 0])
-  const [carDirection, setCarDirection] = useState<Direction>(Direction.North)
+  const [mode, setMode] = useState<Mode>('explore')
+  const [difficulty, setDifficulty] = useState<Difficulty>('easy')
+  const [stage, setStage] = useState(1)
+  const course = useMemo(
+    () =>
+      Array.from({ length: STAGES }, (_, i) =>
+        generateLevel(mode, difficulty, i + 1),
+      ),
+    [mode, difficulty],
+  )
+  const level = course[stage - 1]
+  const [run, setRun] = useState<RunState>(() =>
+    initialRunState(generateLevel('explore', 'easy', 1)),
+  )
   const [commands, setCommands] = useState<Command[]>([])
-  const [isExecuting, setIsExecuting] = useState(false)
-  const [hasWon, setHasWon] = useState(false)
-  const [hasFailed, setHasFailed] = useState(false)
-  const [currentCommandIndex, setCurrentCommandIndex] = useState(-1)
-  const [foodPositions, setFoodPositions] = useState<[number, number][]>([])
-  const [collectedFood, setCollectedFood] = useState<number[]>([])
-  const [obstacles, setObstacles] = useState<[number, number][]>([])
-
-  // Use refs for direct DOM manipulation without re-renders
-  const triangleRef = useRef<HTMLDivElement>(null)
-  const currentRotationRef = useRef(0) // Start facing North (0 degrees)
+  const [currentStep, setCurrentStep] = useState(-1)
+  const [rotation, setRotation] = useState(0)
+  const [visited, setVisited] = useState<Point[]>([])
+  const [usedHint, setUsedHint] = useState(false)
+  const [hintVisible, setHintVisible] = useState(false)
+  const [progress, setProgress] = useState<Progress>({})
+  const [loaded, setLoaded] = useState(false)
+  const [storageAvailable, setStorageAvailable] = useState(true)
+  const [dialog, setDialog] = useState<'help' | 'badges' | null>(null)
+  const [notice, setNotice] = useState('')
+  const queueRef = useRef<HTMLDivElement>(null)
   const boardRef = useRef<HTMLDivElement>(null)
+  const feedbackRef = useRef<HTMLDivElement>(null)
+  const nextRef = useRef<HTMLButtonElement>(null)
+  const dialogOpener = useRef<HTMLElement | null>(null)
+  const openDialog = (name: 'help' | 'badges', opener: HTMLElement) => {
+    dialogOpener.current = opener
+    setDialog(name)
+  }
+  const running = run.status === 'running'
+  const won = run.status === 'success'
+  const failed = ['edge', 'obstacle', 'incomplete'].includes(run.status)
+  const selectedMode = MODES.find((item) => item.id === mode)!
+  const selectedDifficulty = DIFFICULTIES.find(
+    (item) => item.id === difficulty,
+  )!
+  const ModeIcon = selectedMode.icon
+  const stars = totalStars(progress)
+  const completed = completedLevels(progress)
+  const stageStars = progress[level.id] || 0
+  const earned = won
+    ? getStars(commands.length, level.solution.length, usedHint)
+    : 0
+  const courseFinished = course.filter(
+    (adventure) => progress[adventure.id],
+  ).length
 
-  // Initialize the game
   useEffect(() => {
-    resetGame()
+    try {
+      setProgress(parseProgress(localStorage.getItem(PROGRESS_KEY)))
+    } catch {
+      setStorageAvailable(false)
+    }
+    setLoaded(true)
   }, [])
 
-  // Reset game when mode changes
   useEffect(() => {
-    if (gameMode) {
-      resetGame()
+    if (!loaded) return
+    try {
+      localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress))
+    } catch {
+      setStorageAvailable(false)
     }
-  }, [gameMode])
+  }, [progress, loaded])
 
-  // Change game mode
-  const changeGameMode = (mode: GameMode) => {
-    if (!isExecuting) {
-      setGameMode(mode)
-    }
-  }
-
-  // Reset the game with a new random board
-  const resetGame = () => {
-    let start: [number, number] = [Math.floor(Math.random() * BOARD_SIZE), Math.floor(Math.random() * BOARD_SIZE)]
-    let end: [number, number] = [0, 0]
-    let foods: [number, number][] = []
-    let obs: [number, number][] = []
-
-    if (gameMode === "basic") {
-      // Generate random start and end positions
-      // Make sure end position is different from start
-      do {
-        end = [Math.floor(Math.random() * BOARD_SIZE), Math.floor(Math.random() * BOARD_SIZE)]
-      } while (end[0] === start[0] && end[1] === start[1])
-    } else if (gameMode === "pickFood") {
-      // For pick food mode, no start/end, place car at center and generate 2 food positions
-      start = [Math.floor(BOARD_SIZE / 2), Math.floor(BOARD_SIZE / 2)]
-      
-      // Generate 2 random food positions (different from start)
-      const foodEmojis = ["🍎", "🍌"]
-      for (let i = 0; i < 2; i++) {
-        let foodPos: [number, number]
-        do {
-          foodPos = [Math.floor(Math.random() * BOARD_SIZE), Math.floor(Math.random() * BOARD_SIZE)]
-        } while (
-          (foodPos[0] === start[0] && foodPos[1] === start[1]) ||
-          foods.some(f => f[0] === foodPos[0] && f[1] === foodPos[1])
-        )
-        foods.push(foodPos)
-      }
-    } else if (gameMode === "obstacles") {
-      // Generate random start and end positions
-      do {
-        end = [Math.floor(Math.random() * BOARD_SIZE), Math.floor(Math.random() * BOARD_SIZE)]
-      } while (end[0] === start[0] && end[1] === start[1])
-
-      // Generate 2-4 random obstacle positions
-      const numObstacles = 2 + Math.floor(Math.random() * 3) // 2-4 obstacles
-      for (let i = 0; i < numObstacles; i++) {
-        let obstaclePos: [number, number]
-        do {
-          obstaclePos = [Math.floor(Math.random() * BOARD_SIZE), Math.floor(Math.random() * BOARD_SIZE)]
-        } while (
-          (obstaclePos[0] === start[0] && obstaclePos[1] === start[1]) ||
-          (obstaclePos[0] === end[0] && obstaclePos[1] === end[1]) ||
-          obs.some(o => o[0] === obstaclePos[0] && o[1] === obstaclePos[1])
-        )
-        obs.push(obstaclePos)
-      }
-    }
-
-    setStartPosition(start)
-    setEndPosition(end)
-    setCarPosition(start)
-    setCarDirection(Direction.North)
-    setFoodPositions(foods)
-    setCollectedFood([])
-    setObstacles(obs)
-
-    // Reset rotation and position
-    currentRotationRef.current = 0
-    if (triangleRef.current) {
-      triangleRef.current.style.transform = `translate(-50%, -50%) rotate(0deg)`
-      updateTrianglePosition(start[0], start[1], false)
-    }
-
-    setCommands([])
-    setIsExecuting(false)
-    setHasWon(false)
-    setHasFailed(false)
-    setCurrentCommandIndex(-1)
-  }
-
-  // Add a command to the sequence
-  const addCommand = (command: Command) => {
-    if (!isExecuting && !hasWon) {
-      setCommands([...commands, command])
-    }
-  }
-
-  // Clear all commands
-  const clearCommands = () => {
-    if (!isExecuting) {
+  const resetRun = useCallback((nextLevel: Level, clear = false) => {
+    setRun(initialRunState(nextLevel))
+    setRotation(nextLevel.direction * 90)
+    setCurrentStep(-1)
+    setVisited([])
+    setNotice('')
+    if (clear) {
       setCommands([])
-      setCarPosition(startPosition)
-      setCarDirection(Direction.North)
-
-      // Reset rotation and position
-      currentRotationRef.current = 0
-      if (triangleRef.current) {
-        triangleRef.current.style.transform = `translate(-50%, -50%) rotate(0deg)`
-        updateTrianglePosition(startPosition[0], startPosition[1], false)
-      }
-
-      setHasWon(false)
-      setHasFailed(false)
+      setUsedHint(false)
+      setHintVisible(false)
     }
+  }, [])
+
+  const changeAdventure = (
+    nextMode: Mode,
+    nextDifficulty: Difficulty,
+    nextStage: number,
+  ) => {
+    if (
+      running ||
+      (nextMode === mode &&
+        nextDifficulty === difficulty &&
+        nextStage === stage)
+    )
+      return
+    const nextLevel = generateLevel(nextMode, nextDifficulty, nextStage)
+    if (
+      window.matchMedia('(max-width: 640px)').matches &&
+      boardRef.current &&
+      boardRef.current.getBoundingClientRect().top < 0
+    ) {
+      boardRef.current.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'instant'
+          : 'smooth',
+        block: 'start',
+      })
+    }
+    setMode(nextMode)
+    setDifficulty(nextDifficulty)
+    setStage(nextStage)
+    resetRun(nextLevel, true)
   }
 
-  // Update triangle position with animation option
-  const updateTrianglePosition = (x: number, y: number, animate = true) => {
-    if (triangleRef.current) {
-      if (!animate) {
-        // Instant position update (no animation)
-        triangleRef.current.style.transition = "transform 0.5s ease-in-out"
-        triangleRef.current.style.left = `${x * CELL_SIZE + CELL_SIZE / 2}px`
-        triangleRef.current.style.top = `${y * CELL_SIZE + CELL_SIZE / 2}px`
-      } else {
-        // Animated position update
-        triangleRef.current.style.transition = "left 0.5s ease-in-out, top 0.5s ease-in-out, transform 0.5s ease-in-out"
-        triangleRef.current.style.left = `${x * CELL_SIZE + CELL_SIZE / 2}px`
-        triangleRef.current.style.top = `${y * CELL_SIZE + CELL_SIZE / 2}px`
-      }
+  const addCommand = useCallback(
+    (command: Command) => {
+      if (running || won || commands.length >= level.maxCommands) return
+      if (failed) resetRun(level)
+      setNotice('')
+      setCommands((old) => [...old, command])
+    },
+    [running, won, commands.length, level, failed, resetRun],
+  )
+
+  const removeCommand = useCallback(
+    (index: number) => {
+      if (running || won) return
+      resetRun(level)
+      setCommands((old) => old.filter((_, i) => i !== index))
+    },
+    [running, won, resetRun, level],
+  )
+
+  const startRun = useCallback(() => {
+    if (running || won || !commands.length) return
+    setNotice('')
+    setRotation(level.direction * 90)
+    if (window.matchMedia('(max-width: 640px)').matches) {
+      boardRef.current?.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'instant'
+          : 'smooth',
+        block: 'start',
+      })
     }
-  }
+    setVisited([level.start])
+    setCurrentStep(0)
+    setRun({ ...initialRunState(level), status: 'running' })
+  }, [running, won, commands.length, level])
 
-  // Rotate the triangle smoothly
-  const rotateTriangle = (degrees: number) => {
-    if (triangleRef.current) {
-      // Update the rotation reference
-      currentRotationRef.current = degrees
+  const stopRun = useCallback(() => {
+    resetRun(level)
+    setNotice('Stopped. Your plan is still here. Try it again!')
+  }, [resetRun, level])
 
-      // Apply the rotation directly to the DOM element, include visual offset
-      triangleRef.current.style.transform = `translate(-50%, -50%) rotate(${degrees}deg)`
-    }
-  }
-
-  // Execute the commands
-  const executeCommands = async () => {
-    if (commands.length === 0 || isExecuting || hasWon) return
-
-    setIsExecuting(true)
-    setHasWon(false)
-    setHasFailed(false)
-
-    // Start from initial position
-    let currentX = startPosition[0]
-    let currentY = startPosition[1]
-    let currentDirection = Direction.North
-
-    // Reset rotation to North
-    currentRotationRef.current = 0
-    rotateTriangle(0)
-
-    // Update the initial state
-    setCarPosition(startPosition)
-    setCarDirection(Direction.North)
-    updateTrianglePosition(startPosition[0], startPosition[1], false)
-
-    // Execute each command one by one
-    for (let i = 0; i < commands.length; i++) {
-      setCurrentCommandIndex(i)
-
-      // Wait for animation
-      await new Promise((resolve) => setTimeout(resolve, 500))
-
-      const command = commands[i]
-
-      if (command === "forward") {
-        let newX = currentX
-        let newY = currentY
-
-        // Move based on direction
-        switch (currentDirection) {
-          case Direction.North:
-            newY = Math.max(0, currentY - 1)
-            break
-          case Direction.East:
-            newX = Math.min(BOARD_SIZE - 1, currentX + 1)
-            break
-          case Direction.South:
-            newY = Math.min(BOARD_SIZE - 1, currentY + 1)
-            break
-          case Direction.West:
-            newX = Math.max(0, currentX - 1)
-            break
-        }
-
-        // Check if we hit a boundary
-        if (
-          newX === currentX &&
-          newY === currentY &&
-          ((currentDirection === Direction.North && currentY === 0) ||
-            (currentDirection === Direction.East && currentX === BOARD_SIZE - 1) ||
-            (currentDirection === Direction.South && currentY === BOARD_SIZE - 1) ||
-            (currentDirection === Direction.West && currentX === 0))
-        ) {
-          // Update state before breaking
-          setCarPosition([currentX, currentY])
-          setCarDirection(currentDirection)
-          setHasFailed(true)
-          break
-        }
-
-        // Update current position
-        currentX = newX
-        currentY = newY
-
-        // Check for obstacle collision
-        if (gameMode === "obstacles") {
-          const hitObstacle = obstacles.some(obs => obs[0] === currentX && obs[1] === currentY)
-          if (hitObstacle) {
-            updateTrianglePosition(currentX, currentY, true)
-            setCarPosition([currentX, currentY])
-            setHasFailed(true)
-            break
-          }
-        }
-
-        // Update the UI with animation
-        updateTrianglePosition(currentX, currentY, true)
-        setCarPosition([currentX, currentY])
-
-        // Check for food collection
-        if (gameMode === "pickFood") {
-          const foodIndex = foodPositions.findIndex(food => food[0] === currentX && food[1] === currentY)
-          if (foodIndex !== -1 && !collectedFood.includes(foodIndex)) {
-            setCollectedFood(prev => [...prev, foodIndex])
-            // Check if all food collected
-            if (collectedFood.length + 1 === foodPositions.length) {
-              setHasWon(true)
-              break
-            }
-          }
-        }
-
-        // Check if we reached the end (for basic and obstacles mode)
-        if ((gameMode === "basic" || gameMode === "obstacles") && currentX === endPosition[0] && currentY === endPosition[1]) {
-          setHasWon(true)
-          break
-        }
-      } else if (command === "left") {
-        // Turn left (counter-clockwise)
-        currentDirection = (currentDirection + 3) % 4
-
-        // Update rotation - subtract 90 degrees for left turn
-        const newRotation = currentRotationRef.current - 90
-        rotateTriangle(newRotation)
-
-        setCarDirection(currentDirection)
-      } else if (command === "right") {
-        // Turn right (clockwise)
-        currentDirection = (currentDirection + 1) % 4
-
-        // Update rotation - add 90 degrees for right turn
-        const newRotation = currentRotationRef.current + 90
-        rotateTriangle(newRotation)
-
-        setCarDirection(currentDirection)
-      }
-
-      // Wait for animation to complete
-      await new Promise((resolve) => setTimeout(resolve, 500))
-    }
-
-    setCurrentCommandIndex(-1)
-    setIsExecuting(false)
-
-    // Final check for win condition (using the updated position)
-    if (currentX === endPosition[0] && currentY === endPosition[1]) {
-      setHasWon(true)
-    }
-  }
-
-  // Get command icon based on command type
-  const getCommandIcon = (command: Command) => {
-    switch (command) {
-      case "forward":
-        return (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M12 20L12 4"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-            <path
-              d="M8 8L12 4L16 8"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-          </svg>
+  useEffect(() => {
+    if (!running || dialog) return
+    const timer = window.setTimeout(() => {
+      let next = stepRun(level, run, commands[currentStep])
+      setVisited((old) => [...old, next.position])
+      if (next.status === 'running' && currentStep + 1 >= commands.length)
+        next = finishRun(level, next)
+      setRun(next)
+      if (commands[currentStep] === 'left') setRotation((old) => old - 90)
+      if (commands[currentStep] === 'right') setRotation((old) => old + 90)
+      if (next.status === 'success') {
+        const reward = getStars(
+          commands.length,
+          level.solution.length,
+          usedHint,
         )
-      case "left":
-        // Custom SVG for 90-degree left turn starting from bottom with larger arrow
-        return (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M12 20L12 12L4 12"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-            <path
-              d="M8 7L4 12L8 17"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-          </svg>
-        )
-      case "right":
-        // Custom SVG for 90-degree right turn starting from bottom with larger arrow
-        return (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M12 20L12 12L20 12"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-            <path
-              d="M16 7L20 12L16 17"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-          </svg>
-        )
-    }
-  }
-
-  // Render the board
-  const renderBoard = () => {
-    const board = []
-
-    for (let y = 0; y < BOARD_SIZE; y++) {
-      const row = []
-      for (let x = 0; x < BOARD_SIZE; x++) {
-        const isStart = gameMode !== "pickFood" && startPosition[0] === x && startPosition[1] === y
-        const isEnd = (gameMode === "basic" || gameMode === "obstacles") && endPosition[0] === x && endPosition[1] === y
-        const isCar = carPosition[0] === x && carPosition[1] === y
-        const foodIndex = foodPositions.findIndex(food => food[0] === x && food[1] === y)
-        const isFood = foodIndex !== -1
-        const isFoodCollected = isFood && collectedFood.includes(foodIndex)
-        const isObstacle = obstacles.some(obs => obs[0] === x && obs[1] === y)
-
-        let cellClass = `w-[${CELL_SIZE}px] h-[${CELL_SIZE}px] border flex items-center justify-center relative`
-
-        if (isStart) {
-          cellClass += " bg-blue-100"
-        } else if (isEnd) {
-          cellClass += " bg-green-100"
-        } else if (isObstacle) {
-          cellClass += " bg-gray-100"
-        } else {
-          cellClass += " bg-white"
-        }
-
-        const foodEmojis = ["🍎", "🍌"]
-
-        row.push(
-          <div key={`${x}-${y}`} className={cellClass} style={{ width: CELL_SIZE, height: CELL_SIZE }}>
-            {isStart && <Badge variant="outline">Start</Badge>}
-            {isEnd && (
-              <Badge variant="outline" className="bg-green-50">
-                End
-              </Badge>
-            )}
-            {isFood && !isFoodCollected && (
-              <span className="text-3xl" style={{ position: "relative", zIndex: 5 }}>
-                {foodEmojis[foodIndex]}
-              </span>
-            )}
-            {isFood && isFoodCollected && (
-              <span className="text-3xl opacity-30" style={{ position: "relative", zIndex: 5 }}>
-                ✨
-              </span>
-            )}
-            {isObstacle && (
-              <span className="text-3xl" style={{ position: "relative", zIndex: 5 }}>
-                🪨
-              </span>
-            )}
-          </div>,
-        )
+        setProgress((old) => awardStars(old, level.id, reward))
+      } else if (next.status === 'running') {
+        setCurrentStep((old) => old + 1)
       }
-      board.push(
-        <div key={y} className="flex">
-          {row}
-        </div>,
+    }, 650)
+    return () => window.clearTimeout(timer)
+  }, [running, run, currentStep, commands, level, usedHint, dialog])
+
+  useEffect(() => {
+    const target = running
+      ? queueRef.current?.querySelector('[data-current="true"]')
+      : queueRef.current?.lastElementChild
+    if (target && queueRef.current) {
+      const container = queueRef.current
+      const element = target as HTMLElement
+      container.scrollTop = Math.max(
+        0,
+        element.offsetTop -
+          container.offsetTop -
+          container.clientHeight +
+          element.clientHeight +
+          12,
       )
     }
+  }, [commands.length, currentStep, running])
 
-    return board
-  }
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (
+        dialog ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.repeat
+      )
+        return
+      const target = event.target as HTMLElement
+      if (target.closest('input, textarea, select, [contenteditable="true"]'))
+        return
+      const command = {
+        ArrowUp: 'forward',
+        ArrowLeft: 'left',
+        ArrowRight: 'right',
+      }[event.key] as Command | undefined
+      if (command) {
+        event.preventDefault()
+        addCommand(command)
+      } else if (event.key === 'Backspace') {
+        event.preventDefault()
+        removeCommand(commands.length - 1)
+      } else if (event.key === 'Escape' && running) {
+        event.preventDefault()
+        stopRun()
+      } else if (
+        event.key === 'Enter' &&
+        !target.closest('button, a, summary, [role="button"]')
+      ) {
+        event.preventDefault()
+        startRun()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [
+    dialog,
+    addCommand,
+    removeCommand,
+    commands.length,
+    running,
+    stopRun,
+    startRun,
+  ])
+
+  useEffect(() => {
+    if (!won && !failed) return
+    const timer = window.setTimeout(() => {
+      if (won) nextRef.current?.focus({ preventScroll: true })
+      if (window.matchMedia('(max-width: 640px)').matches) {
+        feedbackRef.current?.scrollIntoView({
+          behavior: window.matchMedia('(prefers-reduced-motion: reduce)')
+            .matches
+            ? 'instant'
+            : 'smooth',
+          block: 'center',
+        })
+      }
+    }, 450)
+    return () => window.clearTimeout(timer)
+  }, [won, failed])
+
+  const feedback = won
+    ? {
+        title: 'You found your way!',
+        text:
+          mode === 'collect'
+            ? 'Every apple collected. What a brilliant plan!'
+            : mode === 'treasure'
+              ? 'All the gems and the flag. Amazing exploring!'
+              : 'Look at you go! Your plan worked beautifully.',
+      }
+    : run.status === 'edge'
+      ? {
+          title: 'Oops, that’s the edge!',
+          text: `Step ${currentStep + 1} goes off the map. Try a turn before moving forward.`,
+        }
+      : run.status === 'obstacle'
+        ? {
+            title: 'A rock is in the way!',
+            text: `Step ${currentStep + 1} meets a rock. Let’s find a path around it.`,
+          }
+        : run.status === 'incomplete'
+          ? {
+              title: 'A few more steps to go!',
+              text:
+                level.collectibles.length > run.collected.length
+                  ? `There are still ${selectedMode.collection} to collect. Edit your plan and try again.`
+                  : 'Your car hasn’t reached the flag yet. Add a few more arrows!',
+            }
+          : {
+              title: running
+                ? `Following your plan… ${currentStep + 1} / ${commands.length}`
+                : 'You’re in the driver’s seat',
+              text: running
+                ? 'Watch your car follow each arrow, one step at a time.'
+                : 'Forward moves the car. Left and right turn it on the same tile.',
+            }
 
   return (
-    <div className="flex flex-col items-center justify-center p-4 gap-6 max-w-4xl mx-auto">
-      <div className="flex flex-col md:flex-row gap-8 w-full">
-        {/* Game board */}
-        <div className="flex-1">
-          <Card className="p-4 flex flex-col items-center">
-            <div className="border-2 border-gray-200 rounded-md overflow-hidden relative" ref={boardRef}>
-              {renderBoard()}
-              {/* The triangle is positioned absolutely over the board */}
-              <div
-                ref={triangleRef}
-                className="absolute transition-all duration-500 ease-in-out z-10"
-                style={{
-                  left: `${carPosition[0] * CELL_SIZE + CELL_SIZE / 2}px`,
-                  top: `${carPosition[1] * CELL_SIZE + CELL_SIZE / 2}px`,
-                  transform: `translate(-50%, -50%) rotate(${currentRotationRef.current}deg)`,
-                }}
-              >
-                <svg
-                  width="32"
-                  height="32"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                  className={`${hasWon ? "text-green-500" : hasFailed ? "text-red-500" : "text-blue-500"}`}
-                >
-                  {/* Top-down car view with pointed front and flat back */}
-                  {/* Main car body with tapered front */}
-                  <polygon points="12,2 15,6 15,18 9,18 9,6" fill="currentColor" />
-                  {/* Front windshield */}
-                  <polygon points="11,7 13,7 13,10 11,10" fill="currentColor" opacity="0.4" />
-                  {/* Rear window */}
-                  <polygon points="11,13 13,13 13,16 11,16" fill="currentColor" opacity="0.3" />
-                  {/* Left mirror */}
-                  <circle cx="7.5" cy="8" r="0.8" fill="currentColor" opacity="0.6" />
-                  {/* Right mirror */}
-                  <circle cx="16.5" cy="8" r="0.8" fill="currentColor" opacity="0.6" />
-                </svg>
-              </div>
+    <div className="app-shell">
+      <header className="site-header">
+        <a className="brand" href="/" aria-label="Tiny Trails home">
+          <span className="brand-icon">
+            <Route size={25} strokeWidth={2.6} />
+          </span>
+          <span>
+            tiny<span className="brand-accent">trails</span>
+            <span className="brand-dot">.</span>
+          </span>
+        </a>
+        <nav className="header-nav" aria-label="Main navigation">
+          <span className="nav-active">
+            <Map size={17} /> Let’s play
+          </span>
+          <button
+            onClick={(event) => openDialog('badges', event.currentTarget)}
+          >
+            <Trophy size={17} /> My badges
+          </button>
+        </nav>
+        <div className="header-actions">
+          <span className="star-wallet" aria-label={`${stars} stars earned`}>
+            <Star size={18} fill="currentColor" />
+            <strong>{stars}</strong>
+            <span>stars</span>
+          </span>
+          <button
+            className="help-button"
+            onClick={(event) => openDialog('help', event.currentTarget)}
+            aria-label="How to play"
+          >
+            <CircleHelp size={22} />
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <section className="hero" aria-labelledby="hero-title">
+          <div className="hero-copy">
+            <span className="eyebrow">
+              <span /> LITTLE EXPLORERS, BIG IDEAS
+            </span>
+            <h1 id="hero-title">
+              Small steps.
+              <br className="hero-title-break" /> <span>Big adventures.</span>
+            </h1>
+            <p>
+              A little car. A clever plan. A world to explore.
+              <br className="desktop-break" /> Where will your thinking take
+              you?
+            </p>
+            <div className="hero-notes">
+              <span>
+                <Sprout size={16} /> Ages 6+
+              </span>
+              <span>
+                <Sparkles size={16} /> Learn through play
+              </span>
+              <span>
+                <Check size={16} /> Go at your pace
+              </span>
             </div>
-          </Card>
+          </div>
+          <div className="hero-art">
+            <AdventureArt />
+            <span className="adventure-sticker">
+              <Sparkles size={15} /> Every try is a step forward!
+            </span>
+          </div>
+        </section>
+
+        <section
+          className="adventure-section"
+          aria-labelledby="adventure-heading"
+        >
+          <div className="section-heading">
+            <h2 id="adventure-heading">
+              <span className="step-circle">1</span> Pick your adventure
+            </h2>
+            <span className="quiet-label">Four ways to grow your thinking</span>
+          </div>
+          <div
+            className="mode-options"
+            role="group"
+            aria-label="Adventure mode"
+          >
+            {MODES.map((item) => {
+              const Icon = item.icon
+              return (
+                <button
+                  key={item.id}
+                  className={`mode-card ${item.color} ${mode === item.id ? 'selected' : ''}`}
+                  aria-pressed={mode === item.id}
+                  disabled={running}
+                  onClick={() => changeAdventure(item.id, difficulty, 1)}
+                >
+                  <span className="mode-icon">
+                    <Icon size={25} strokeWidth={1.8} />
+                  </span>
+                  <span className="mode-copy">
+                    <strong>{item.name}</strong>
+                    <span>{item.description}</span>
+                  </span>
+                  <span
+                    className={`mode-selector ${mode === item.id ? 'checked' : ''}`}
+                    aria-hidden="true"
+                  >
+                    {mode === item.id && <Check size={12} strokeWidth={3} />}
+                  </span>
+                  {item.tag && <span className="mode-tag">{item.tag}</span>}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+
+        <div className="game-settings">
+          <div className="difficulty-label">
+            <span className="step-circle">2</span>
+            <strong>Choose your challenge</strong>
+          </div>
+          <div
+            className="difficulty-options"
+            role="group"
+            aria-label="Difficulty"
+          >
+            {DIFFICULTIES.map((item) => {
+              const Icon = item.icon
+              return (
+                <button
+                  key={item.id}
+                  aria-pressed={difficulty === item.id}
+                  disabled={running}
+                  onClick={() => changeAdventure(mode, item.id, 1)}
+                  className={difficulty === item.id ? 'selected' : ''}
+                >
+                  <Icon size={16} />
+                  {item.name}
+                  <span>{item.description}</span>
+                </button>
+              )
+            })}
+          </div>
+          <span className="no-rush">
+            <span /> No timer. Just you & your ideas.
+          </span>
         </div>
 
-        {/* Controls */}
-        <div className="flex-1">
-          <Card className="p-4">
-            {/* Game Mode buttons */}
-            <div className="mb-6">
-              <p className="text-sm font-medium mb-2">Game Mode:</p>
-              <div className="flex gap-2">
-                <Button
-                  onClick={() => changeGameMode("basic")}
-                  disabled={isExecuting}
-                  variant={gameMode === "basic" ? "default" : "outline"}
-                  className="flex-1"
+        <section className="play-layout" aria-label="Play your adventure">
+          <div className="board-panel" ref={boardRef}>
+            <div className="panel-heading">
+              <div>
+                <span className="overline">
+                  {selectedMode.name} <span> / </span> {selectedDifficulty.name}
+                </span>
+                <h2>
+                  Adventure {String(stage).padStart(2, '0')}{' '}
+                  <span className="level-chip">
+                    {level.size} × {level.size} map
+                  </span>
+                </h2>
+              </div>
+              <Stars count={stageStars} size={21} />
+            </div>
+            <div className="mission">
+              <span className={`mission-icon ${selectedMode.color}`}>
+                <ModeIcon size={18} />
+              </span>
+              <span>{selectedMode.mission}</span>
+              {level.collectibles.length > 0 && (
+                <strong
+                  aria-label={`${run.collected.length} of ${level.collectibles.length} ${selectedMode.collection} collected`}
                 >
-                  🚗 STANDARD
-                </Button>
-                <Button
-                  onClick={() => changeGameMode("pickFood")}
-                  disabled={isExecuting}
-                  variant={gameMode === "pickFood" ? "default" : "outline"}
-                  className="flex-1"
+                  {run.collected.length} / {level.collectibles.length}
+                </strong>
+              )}
+            </div>
+            <GameBoard
+              level={level}
+              run={run}
+              visited={visited}
+              hint={hintVisible}
+              rotation={rotation}
+            />
+            <div className="map-legend">
+              <span>
+                <i className="legend-car" /> Your car
+              </span>
+              {mode !== 'collect' && (
+                <span>
+                  <Flag size={14} /> Finish
+                </span>
+              )}
+              {level.collectibles.length > 0 && (
+                <span>
+                  {mode === 'collect' ? <Apple size={14} /> : <Gem size={14} />}{' '}
+                  Collect all
+                </span>
+              )}
+              {level.obstacles.length > 0 && (
+                <span>
+                  <Mountain size={14} /> Go around
+                </span>
+              )}
+              <span className="legend-direction">
+                Facing {DIRECTIONS[run.direction]}{' '}
+                <ArrowUp
+                  size={14}
+                  style={{ transform: `rotate(${run.direction * 90}deg)` }}
+                />
+              </span>
+            </div>
+            {running && (
+              <div className="mobile-run-strip">
+                <span>
+                  Step {currentStep + 1} of {commands.length}
+                </span>
+                <button onClick={stopRun}>
+                  <Square size={14} /> Stop & edit
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="plan-panel">
+            <div className="plan-heading">
+              <h2>
+                <span className="step-circle">3</span> Make your plan
+              </h2>
+              <span className="small-tag">YOU’VE GOT THIS</span>
+            </div>
+            <p className="plan-description">
+              Tap the arrows. Then let your adventure begin!
+            </p>
+            <div className="command-controls">
+              {(['left', 'forward', 'right'] as Command[]).map((command) => {
+                const { icon: Icon, name, detail } = COMMANDS[command]
+                return (
+                  <button
+                    key={command}
+                    className={`command-button command-${command}`}
+                    onClick={() => addCommand(command)}
+                    disabled={
+                      running || won || commands.length >= level.maxCommands
+                    }
+                  >
+                    <Icon size={29} strokeWidth={2.5} />
+                    <strong>{name}</strong>
+                    <span>{detail}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="queue-heading">
+              <h3>
+                Your arrows{' '}
+                <span>
+                  {commands.length} / {level.maxCommands}
+                </span>
+              </h3>
+              <div>
+                <button
+                  className="icon-button"
+                  title="Undo last arrow"
+                  aria-label="Undo last arrow"
+                  disabled={!commands.length || running || won}
+                  onClick={() => removeCommand(commands.length - 1)}
                 >
-                  🍎 FOOD
-                </Button>
-                <Button
-                  onClick={() => changeGameMode("obstacles")}
-                  disabled={isExecuting}
-                  variant={gameMode === "obstacles" ? "default" : "outline"}
-                  className="flex-1"
+                  <Undo2 size={17} />
+                </button>
+                <button
+                  className="icon-button"
+                  title="Clear plan"
+                  aria-label="Clear plan"
+                  disabled={!commands.length || running || won}
+                  onClick={() => {
+                    resetRun(level)
+                    setCommands([])
+                  }}
                 >
-                  🪨 ROCKS
-                </Button>
+                  <Trash2 size={16} />
+                </button>
               </div>
             </div>
-
-            {/* Command buttons */}
-            <div className="flex gap-2 mb-6">
-              <Button onClick={() => addCommand("forward")} disabled={isExecuting || hasWon} className="flex-1">
-                {getCommandIcon("forward")}
-                <span className="ml-1">Forward</span>
-              </Button>
-              <Button onClick={() => addCommand("left")} disabled={isExecuting || hasWon} className="flex-1">
-                {getCommandIcon("left")}
-                <span className="ml-1">Left</span>
-              </Button>
-              <Button onClick={() => addCommand("right")} disabled={isExecuting || hasWon} className="flex-1">
-                {getCommandIcon("right")}
-                <span className="ml-1">Right</span>
-              </Button>
+            <div
+              className={`command-queue ${commands.length ? 'has-commands' : ''}`}
+              ref={queueRef}
+              aria-label="Your planned arrows"
+            >
+              {commands.length === 0 ? (
+                <div className="queue-empty">
+                  <div>
+                    <span>
+                      <CornerUpLeft size={20} />
+                    </span>
+                    <span>
+                      <ArrowUp size={20} />
+                    </span>
+                    <span>
+                      <CornerUpRight size={20} />
+                    </span>
+                  </div>
+                  <p>Big adventures start with one arrow.</p>
+                  <span>Tap a button above to add your first step.</span>
+                </div>
+              ) : (
+                commands.map((command, i) => {
+                  const Icon = COMMANDS[command].icon
+                  return (
+                    <button
+                      key={i}
+                      disabled={running || won}
+                      data-current={i === currentStep}
+                      className={`queued-command command-${command} ${i === currentStep ? (failed ? 'step-failed' : 'step-active') : ''} ${i < currentStep || (won && i === currentStep) ? 'step-done' : ''}`}
+                      onClick={() => removeCommand(i)}
+                      aria-label={`Step ${i + 1}: ${COMMANDS[command].name}. Click to remove.`}
+                      aria-current={
+                        running && i === currentStep ? 'step' : undefined
+                      }
+                    >
+                      <small>{i + 1}</small>
+                      <Icon size={23} />
+                      <span className="remove-step">
+                        <X size={10} />
+                      </span>
+                    </button>
+                  )
+                })
+              )}
+            </div>
+            <div className="queue-tip">
+              {commands.length >= level.maxCommands ? (
+                'Your plan is full. Remove an arrow to make room.'
+              ) : commands.length ? (
+                'Changed your mind? Tap an arrow to remove it.'
+              ) : (
+                <>
+                  <Lightbulb size={13} /> Little tip: your car starts facing up.
+                </>
+              )}
             </div>
 
-            {/* Command sequence */}
-            <div className="mb-4">
-              <div className="border rounded-md p-2 min-h-[100px] bg-gray-50">
-                {commands.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">Add commands to create your program</p>
+            <div
+              ref={feedbackRef}
+              className={`feedback ${won ? 'feedback-success' : failed ? 'feedback-retry' : ''}`}
+              role="status"
+              aria-live={running ? 'off' : 'polite'}
+              aria-atomic="true"
+            >
+              <div className="feedback-icon">
+                {won ? (
+                  <Trophy size={24} />
+                ) : failed ? (
+                  <RotateCcw size={22} />
                 ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {commands.map((cmd, index) => (
-                      <Badge
-                        key={index}
-                        variant={currentCommandIndex === index ? "default" : "outline"}
-                        className={`${currentCommandIndex === index ? "bg-primary" : ""} p-2`}
-                      >
-                        {getCommandIcon(cmd)}
-                      </Badge>
-                    ))}
-                  </div>
+                  <Lightbulb size={23} />
                 )}
               </div>
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex gap-2">
-              <Button
-                onClick={executeCommands}
-                disabled={commands.length === 0 || isExecuting || hasWon}
-                className="flex-1"
-                variant="default"
-              >
-                <Play className="mr-1 h-4 w-4" />
-                Go
-              </Button>
-              <Button
-                onClick={clearCommands}
-                disabled={commands.length === 0 || isExecuting}
-                className="flex-1"
-                variant="outline"
-              >
-                <Trash2 className="mr-1 h-4 w-4" />
-                Forget
-              </Button>
-              <Button onClick={resetGame} disabled={isExecuting} className="flex-1" variant="outline">
-                <RotateCw className="mr-1 h-4 w-4" />
-                New Board
-              </Button>
-            </div>
-
-            {/* Status message */}
-            {hasWon && (
-              <div className="mt-4 p-2 bg-green-100 text-green-800 rounded-md text-center">
-                {gameMode === "pickFood" 
-                  ? "Success! You collected all the food! 🎉"
-                  : "Success! The car reached the destination! 🎉"}
+              <div>
+                <strong>{notice || feedback.title}</strong>
+                <p>{feedback.text}</p>
+                {won && <Stars count={earned} size={22} />}
               </div>
-            )}
-            {hasFailed && (
-              <div className="mt-4 p-2 bg-red-100 text-red-800 rounded-md text-center">
-                {gameMode === "obstacles"
-                  ? "Oops! The car hit an obstacle! Try again! 💥"
-                  : "The car couldn't complete all commands. Try again!"}
+            </div>
+            {won ? (
+              <div className="success-actions">
+                <button
+                  ref={nextRef}
+                  className="go-button"
+                  onClick={() =>
+                    stage < STAGES
+                      ? changeAdventure(mode, difficulty, stage + 1)
+                      : changeAdventure(
+                          MODES[
+                            (MODES.findIndex((m) => m.id === mode) + 1) %
+                              MODES.length
+                          ].id,
+                          difficulty,
+                          1,
+                        )
+                  }
+                >
+                  {stage < STAGES ? 'Next adventure' : 'Try another adventure'}
+                  <ArrowRight size={20} />
+                </button>
+                <button
+                  className="replay-button"
+                  onClick={() => resetRun(level, true)}
+                >
+                  <RotateCcw size={15} /> Play again
+                </button>
               </div>
+            ) : (
+              <button
+                className={`go-button ${running ? 'stop-button' : ''}`}
+                onClick={running ? stopRun : startRun}
+                disabled={!running && !commands.length}
+              >
+                {running ? (
+                  <Square size={18} fill="currentColor" />
+                ) : (
+                  <Play size={19} fill="currentColor" />
+                )}
+                {running
+                  ? 'Stop & edit'
+                  : failed
+                    ? 'Let’s try again!'
+                    : 'Let’s go!'}
+                {!running && <ArrowRight className="go-arrow" size={19} />}
+              </button>
             )}
-          </Card>
-        </div>
-      </div>
+            <button
+              className="hint-button"
+              disabled={running || won}
+              aria-pressed={hintVisible}
+              onClick={() => {
+                setUsedHint(true)
+                setHintVisible((old) => !old)
+              }}
+            >
+              <Lightbulb size={16} />
+              {hintVisible ? 'Hide the helping path' : 'A little help, please'}
+              <ChevronRight size={14} />
+            </button>
+            {hintVisible && (
+              <p className="hint-explanation">
+                Follow the dotted tiles. Turn to face the next tile, then move
+                forward. You can still earn 2 stars!
+                <span className="hint-start">
+                  Start with:{' '}
+                  {level.solution
+                    .slice(0, 4)
+                    .map((command) => COMMANDS[command].name)
+                    .join(' → ')}
+                  {level.solution.length > 4 ? '…' : ''}
+                </span>
+              </p>
+            )}
+          </div>
+        </section>
+
+        <section className="journey-panel" aria-labelledby="journey-title">
+          <div className="journey-intro">
+            <span className="journey-icon">
+              <Route size={23} />
+            </span>
+            <div>
+              <h2 id="journey-title">Your little journey</h2>
+              <p>
+                {courseFinished} of {STAGES} adventures explored{' '}
+                <span>
+                  · {selectedMode.name} / {selectedDifficulty.name}
+                </span>
+              </p>
+            </div>
+          </div>
+          <div
+            className="journey-stages"
+            role="group"
+            aria-label="Choose adventure"
+          >
+            {Array.from({ length: STAGES }, (_, i) => {
+              const n = i + 1
+              const score = progress[course[i].id] || 0
+              return (
+                <button
+                  key={n}
+                  className={`journey-stage ${stage === n ? 'current' : ''} ${score ? 'completed' : ''}`}
+                  disabled={running}
+                  aria-label={`Adventure ${n}${score ? `, ${score} stars earned` : ', not completed'}`}
+                  aria-pressed={stage === n}
+                  onClick={() => changeAdventure(mode, difficulty, n)}
+                >
+                  <span>{score ? <Check size={19} strokeWidth={3} /> : n}</span>
+                  <Stars count={score} size={9} />
+                </button>
+              )
+            })}
+          </div>
+        </section>
+        <footer className="site-footer">
+          <span>
+            <Sprout size={15} /> A little play. A little learning. A lot of
+            possibility.
+          </span>
+          <span>
+            {storageAvailable
+              ? 'Your stars are saved on this device.'
+              : 'Stars stay for this visit. Browser storage is unavailable.'}
+          </span>
+        </footer>
+      </main>
+
+      <Dialog.Root
+        open={dialog !== null}
+        onOpenChange={(open) => {
+          if (!open) setDialog(null)
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content
+            className="game-dialog"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault()
+              dialogOpener.current?.focus()
+            }}
+          >
+            <Dialog.Close className="dialog-close" aria-label="Close dialog">
+              <X size={20} />
+            </Dialog.Close>
+            {dialog === 'help' ? (
+              <>
+                <div className="dialog-symbol">
+                  <Route size={30} />
+                </div>
+                <Dialog.Title>Little arrows. Big ideas.</Dialog.Title>
+                <Dialog.Description>
+                  Help your car explore, one step at a time.
+                </Dialog.Description>
+                <ol className="help-steps">
+                  <li>
+                    <span>1</span>
+                    <div>
+                      <strong>Look at your map</strong>
+                      <p>
+                        Find your car, the flag, and anything to collect. Your
+                        car starts facing up.
+                      </p>
+                    </div>
+                  </li>
+                  <li>
+                    <span>2</span>
+                    <div>
+                      <strong>Make a plan with arrows</strong>
+                      <p>
+                        Forward moves one tile. Left and right turn your car in
+                        place. Think about which way your car is facing!
+                      </p>
+                    </div>
+                  </li>
+                  <li>
+                    <span>3</span>
+                    <div>
+                      <strong>Press “Let’s go!”</strong>
+                      <p>
+                        Watch your plan come to life. If you meet a rock or the
+                        edge, edit your arrows and try again. Every run starts
+                        at the beginning.
+                      </p>
+                    </div>
+                  </li>
+                </ol>
+                <div className="star-guide">
+                  <Stars count={3} />
+                  <p>
+                    Finish to earn a star. A shorter plan earns more! A helping
+                    path can earn up to 2 stars. Your best score always stays.
+                  </p>
+                </div>
+                <p className="keyboard-help">
+                  <strong>Keyboard explorers:</strong> ↑ forward · ← turn left ·
+                  → turn right · Backspace undo · Enter run (when no button is
+                  focused) · Esc stop
+                </p>
+                <Dialog.Close className="go-button">
+                  Ready to explore <ArrowRight size={18} />
+                </Dialog.Close>
+              </>
+            ) : (
+              <>
+                <div className="dialog-symbol gold">
+                  <Trophy size={30} />
+                </div>
+                <Dialog.Title>Your explorer badges</Dialog.Title>
+                <Dialog.Description>
+                  Every little adventure helps you grow.
+                </Dialog.Description>
+                <div className="badge-totals">
+                  <div>
+                    <Star size={23} />
+                    <strong>{stars}</strong>
+                    <span>stars collected</span>
+                  </div>
+                  <div>
+                    <Flag size={23} />
+                    <strong>{completed} / 72</strong>
+                    <span>adventures explored</span>
+                  </div>
+                </div>
+                <div className="badge-grid">
+                  {[
+                    {
+                      name: 'First steps',
+                      detail: 'Finish your first adventure',
+                      earned: completed >= 1,
+                      icon: Sprout,
+                    },
+                    {
+                      name: 'Star collector',
+                      detail: 'Collect 12 stars',
+                      earned: stars >= 12,
+                      icon: Star,
+                    },
+                    {
+                      name: 'Curious explorer',
+                      detail: 'Finish a level in all 4 modes',
+                      earned: MODES.every((m) =>
+                        Object.keys(progress).some((id) =>
+                          id.startsWith(`${m.id}-`),
+                        ),
+                      ),
+                      icon: Map,
+                    },
+                    {
+                      name: 'Trail champion',
+                      detail: 'Finish 18 adventures',
+                      earned: completed >= 18,
+                      icon: Trophy,
+                    },
+                  ].map((badge) => (
+                    <div
+                      key={badge.name}
+                      className={`explorer-badge ${badge.earned ? 'unlocked' : ''}`}
+                    >
+                      <badge.icon size={27} />
+                      <strong>{badge.name}</strong>
+                      <span>{badge.detail}</span>
+                      <small>
+                        {badge.earned ? 'Earned!' : 'Keep exploring'}
+                      </small>
+                    </div>
+                  ))}
+                </div>
+                <p className="badge-note">
+                  {storageAvailable
+                    ? 'Saved in this browser. No account needed — just your curiosity.'
+                    : 'Browser storage is unavailable. Keep this page open to keep your stars.'}
+                </p>
+                <Dialog.Close className="go-button">
+                  Keep exploring <ArrowRight size={18} />
+                </Dialog.Close>
+              </>
+            )}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   )
 }

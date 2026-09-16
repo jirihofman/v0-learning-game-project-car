@@ -1,7 +1,5 @@
-"use client"
+import CarGame from '@/car-game'
 
-import CarGame from "../car-game"
-
-export default function SyntheticV0PageForDeployment() {
+export default function HomePage() {
   return <CarGame />
 }
